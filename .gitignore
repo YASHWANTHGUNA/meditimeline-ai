@@ -1,0 +1,22 @@
+# Environment files (Secrets)
+.env
+backend/.env
+frontend/.env
+*.env
+
+# Frontend dependencies and builds
+frontend/node_modules/
+node_modules/
+frontend/dist/
+frontend/build/
+
+# Python cache & virtual environments
+**/__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# System files
+.DS_Store
+Thumbs.db
