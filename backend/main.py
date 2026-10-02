@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 from schemas import ReportParseRequest, TimelineResponse
 from services import extract_timeline_from_text
+from timeline_engine import sort_and_normalize_timeline
 
 load_dotenv()
 
@@ -41,16 +42,23 @@ async def health_check():
 @app.post("/api/parse-report", response_model=TimelineResponse)
 async def parse_report(payload: ReportParseRequest):
     try:
-        events = extract_timeline_from_text(payload.report_text)
+        # Step 1: Extract and validate raw events via Gemini service
+        raw_events = extract_timeline_from_text(payload.report_text)
         
+        # Step 2: Normalize dates and sort events chronologically via Python engine
+        events = sort_and_normalize_timeline(raw_events)
+        
+        # Step 3: Prepare document for MongoDB persistence
         timeline_doc = {
             "patient_id": payload.patient_id,
             "raw_text": payload.report_text,
             "events": [event.model_dump() for event in events]
         }
         
+        # Step 4: Store in MongoDB
         await db.timelines.insert_one(timeline_doc)
         
+        # Step 5: Return structured response
         return TimelineResponse(
             patient_id=payload.patient_id,
             events=events,
