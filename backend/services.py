@@ -1,54 +1,57 @@
 import os
-import json
 from google import genai
 from google.genai import types
-from dotenv import load_dotenv
-from schemas import TimelineEvent
+from schemas import ExtractionResponse
 
-load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# Initialize the modern GenAI client
+client = genai.Client()
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-# Initialize the official Google GenAI SDK client
-client = genai.Client(api_key=GEMINI_API_KEY)
-
-def extract_timeline_from_text(report_text: str) -> list[TimelineEvent]:
+async def extract_timeline_from_text(text: str) -> dict:
     """
-    Sends medical report text to Gemini 2.5 Flash and forces a structured 
-    JSON response conforming to our clinical event schema.
+    Analyzes unstructured medical text and extracts a structured timeline of clinical events.
+    Uses the async client to avoid blocking the FastAPI event loop.
     """
     prompt = f"""
-    You are an expert clinical data extraction assistant. 
-    Analyze the following medical report and extract all clinical events into a structured chronological list.
-    
-    Classify each event into one of these exact types:
-    - Diagnosis
-    - Medication
-    - Lab Result
-    - Hospital Visit
-    - Procedure
-    
-    If test results are outside normal limits, set 'abnormal' to true.
-    Extract any relevant medications mentioned into the 'medications' list.
+    You are an expert clinical data extractor. Analyze the following medical record text
+    and extract all clinically significant events into a structured timeline.
 
-    Medical Report Text:
-    {report_text}
+    Identify and extract:
+    1. Diagnoses and conditions.
+    2. Medications (including dose, frequency, and changes like 'increased' or 'stopped').
+    3. Laboratory results (include values, units, reference ranges, and flag abnormal results).
+    4. Procedures, hospital visits, and significant symptoms.
+
+    Important Instructions:
+    - Retain the exact date or timeframe mentioned. If no date is mentioned, leave it null.
+    - Accurately flag abnormal lab results based on provided text or standard reference ranges.
+    - Extract precise source text snippets that support your extraction.
+    
+    Medical Text:
+    {text}
     """
-
+    
     try:
-        response = client.models.generate_content(
-            model='gemini-3.5-flash',
+        # Utilize the async client (.aio) and enforce the Pydantic schema output
+        response = await client.aio.models.generate_content(
+            model=DEFAULT_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=list[TimelineEvent],
-                temperature=0.1 # Low temperature for clinical accuracy
-            ),
+                response_schema=ExtractionResponse,
+                temperature=0.1 # Low temperature for deterministic, factual extraction
+            )
         )
         
-        # Parse the structured JSON output into validated Pydantic models
-        events_data = json.loads(response.text)
-        validated_events = [TimelineEvent(**event) for event in events_data]
-        return validated_events
-
+        # The new SDK parses the JSON automatically into the Pydantic model
+        if response.parsed:
+            return response.parsed.model_dump()
+        else:
+            # Fallback if parsed is empty but text exists
+            import json
+            return json.loads(response.text)
+            
     except Exception as e:
-        raise RuntimeError(f"AI extraction failed: {str(e)}")
+        print(f"Error during Gemini extraction: {e}")
+        # Return an empty structure on failure to prevent total crashes
+        return {"events": []}
