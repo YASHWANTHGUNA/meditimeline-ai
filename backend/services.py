@@ -36,7 +36,7 @@ def extract_timeline_from_text(report_text: str) -> list[TimelineEvent]:
 
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.5-flash',
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
