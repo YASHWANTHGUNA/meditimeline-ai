@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileText, User, Sparkles } from 'lucide-react';
+import { User, Sparkles } from 'lucide-react';
 
 export default function ReportInput({ onAnalysisComplete, setIsLoading, setError }) {
   const [patientId, setPatientId] = useState('P001');
@@ -7,12 +7,35 @@ export default function ReportInput({ onAnalysisComplete, setIsLoading, setError
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!reportText.trim()) return setError('Please enter medical report text.');
     
+    if (!reportText.trim()) {
+      return setError('Please enter medical report text.');
+    }
+
     setIsLoading(true);
     setError(null);
+
     try {
-      const data = await import('../services/api').then(mod => mod.parseMedicalReport(patientId, reportText));
+      // Step 4 replacement: Use a dynamic import for the API service
+      const { parseMedicalReport } = await import('../services/api');
+      const data = await parseMedicalReport(patientId.trim(), reportText);
+
+      // Consolidate possible event formats safely
+      const events =
+        data?.timeline?.all_events ??
+        data?.events ??
+        [];
+
+      // Verify the layout contains valid, non-empty structures
+      if (!Array.isArray(events) || events.length === 0) {
+        onAnalysisComplete(null);
+        setError(
+          data?.message ||
+          'No clinical events were extracted. Please try again with a more detailed report.'
+        );
+        return;
+      }
+
       onAnalysisComplete(data);
     } catch (err) {
       setError(err.message);
@@ -25,7 +48,9 @@ export default function ReportInput({ onAnalysisComplete, setIsLoading, setError
     <div className="bg-white p-8 md:p-10 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 mb-10">
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-slate-900 mb-2">Clinical Record Ingestion</h2>
-        <p className="text-slate-500 text-sm">Securely parse fragmented medical histories, prescriptions, and lab results into a structured timeline.</p>
+        <p className="text-slate-500 text-sm">
+          Securely parse fragmented medical histories, prescriptions, and lab results into a structured timeline.
+        </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -65,8 +90,7 @@ export default function ReportInput({ onAnalysisComplete, setIsLoading, setError
             type="submit"
             className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3.5 rounded-xl text-sm font-bold tracking-wide transition-all duration-200 flex items-center gap-2 shadow-lg shadow-blue-600/20 active:scale-95"
           >
-            <Sparkles className="w-5 h-5" />
-            Generate Health Timeline
+            <Sparkles className="w-5 h-5" /> Generate Health Timeline
           </button>
         </div>
       </form>

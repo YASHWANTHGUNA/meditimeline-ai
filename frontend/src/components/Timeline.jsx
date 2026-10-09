@@ -3,8 +3,19 @@ import TimelineEvent from './TimelineEvent';
 import { Activity, Clock } from 'lucide-react';
 
 export default function Timeline({ timelineData }) {
-  if (!timelineData || !timelineData.events || timelineData.events.length === 0) {
-    return null;
+  // Backend returns events inside timeline.all_events.
+  // Keep the fallback for compatibility with a flat events response.
+  const events =
+    timelineData?.timeline?.all_events ??
+    timelineData?.events ??
+    [];
+
+  if (!Array.isArray(events) || events.length === 0) {
+    return (
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 text-slate-600">
+        No clinical events are available to display.
+      </div>
+    );
   }
 
   return (
@@ -15,19 +26,27 @@ export default function Timeline({ timelineData }) {
             <Activity className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-white">Chronological Patient Health Timeline</h2>
-            <p className="text-xs text-slate-400">Normalized and sorted clinical event history</p>
+            <h2 className="text-xl font-bold text-white">
+              Chronological Patient Health Timeline
+            </h2>
+            <p className="text-xs text-slate-400">
+              Normalized and sorted clinical event history
+            </p>
           </div>
         </div>
+
         <div className="flex items-center gap-2 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 text-xs font-medium text-cyan-400">
           <Clock className="w-3.5 h-3.5" />
-          <span>Patient ID: {timelineData.patient_id}</span>
+          <span>Patient ID: {timelineData?.patient_id ?? 'Unknown'}</span>
         </div>
       </div>
 
       <div className="ml-4 space-y-2">
-        {timelineData.events.map((event, index) => (
-          <TimelineEvent key={index} event={event} />
+        {events.map((event, index) => (
+          <TimelineEvent
+            key={event.event_id ?? index}
+            event={event}
+          />
         ))}
       </div>
     </div>

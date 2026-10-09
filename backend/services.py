@@ -5,7 +5,7 @@ from schemas import ExtractionResponse
 
 # Initialize the modern GenAI client
 client = genai.Client()
-DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 async def extract_timeline_from_text(text: str) -> dict:
     """
@@ -21,9 +21,12 @@ async def extract_timeline_from_text(text: str) -> dict:
     2. Medications (including dose, frequency, and changes like 'increased' or 'stopped').
     3. Laboratory results (include values, units, reference ranges, and flag abnormal results).
     4. Procedures, hospital visits, and significant symptoms.
+    5. Family History (including relatives' conditions and age of onset).
 
     Important Instructions:
-    - Retain the exact date or timeframe mentioned. If no date is mentioned, leave it null.
+    - CRITICAL: Extract ONLY information explicitly present in the source text.
+    - DO NOT hallucinate, infer, or invent patient history, dates, medications, or events.
+    - Retain the exact date or timeframe mentioned. If a detail (like a specific date) is missing, leave it null. Do not guess.
     - Accurately flag abnormal lab results based on provided text or standard reference ranges.
     - Extract precise source text snippets that support your extraction.
     
@@ -53,5 +56,7 @@ async def extract_timeline_from_text(text: str) -> dict:
             
     except Exception as e:
         print(f"Error during Gemini extraction: {e}")
-        # Return an empty structure on failure to prevent total crashes
-        return {"events": []}
+        raise RuntimeError(
+            "Medical report extraction failed. Gemini may be temporarily "
+             "unavailable. Please try again shortly."
+             ) from e
