@@ -34,7 +34,7 @@ db = client.meditimeline
 
 class ParseRequest(BaseModel):
     text: str
-    patient_id: str = "P001"  # Defaulting for now until auth/patient-selection is built
+    patient_id: str = "P001" # Defaulting for now until auth/patient-selection is built
 
 @app.post("/api/parse-report")
 async def parse_report(request: ParseRequest):
@@ -46,11 +46,28 @@ async def parse_report(request: ParseRequest):
         raise HTTPException(status_code=400, detail="Text cannot be empty.")
     
     # 1. Extract structured events using Gemini
-    extraction_result = await extract_timeline_from_text(request.text)
+    try:
+        extraction_result = await extract_timeline_from_text(request.text)
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=503, 
+            detail=str(e)
+        ) from e
+        
     raw_events = extraction_result.get("events", [])
-    
     if not raw_events:
-        return {"message": "No events extracted.", "timeline": {}}
+        return {
+            "message": "No clinical events were extracted from this report.",
+            "patient_id": request.patient_id,
+            "timeline": {
+                "dated_events": [],
+                "undated_events": [],
+                "all_events": [],
+                "total_events": 0,
+                "dated_count": 0,
+                "undated_count": 0
+            }
+        }
         
     document_id = f"doc_{uuid.uuid4().hex[:12]}"
     current_time = datetime.utcnow()
@@ -61,7 +78,7 @@ async def parse_report(request: ParseRequest):
         "patient_id": request.patient_id,
         "source_type": "text_paste",
         "uploaded_at": current_time,
-        "content_hash": hash(request.text)  # Basic hash for deduplication logic later
+        "content_hash": hash(request.text) # Basic hash for deduplication logic later
     })
     
     # 3. Attach provenance and patient ID to each event before saving
