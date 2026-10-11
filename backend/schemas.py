@@ -16,37 +16,46 @@ class MedicationInfo(BaseModel):
     frequency: Optional[str] = Field(None, description="Frequency (e.g., once daily, BID, PRN)")
     route: Optional[str] = Field(None, description="Route of administration (e.g., Oral, IV)")
     action: Optional[Literal[
-        "started",
-        "continued",
-        "stopped",
-        "increased",
-        "decreased",
-        "changed",
-        "unknown"
+        "started", "continued", "stopped", "increased", "decreased", "changed", "unknown"
     ]] = "unknown"
 
 class SourceReference(BaseModel):
     document_id: Optional[str] = Field(None, description="Unique ID of the source document")
     document_name: Optional[str] = Field(None, description="Filename or title of the document")
-    page: Optional[int] = Field(None, description="Page number where the event was found")
-    source_text: Optional[str] = Field(None, description="The exact sentence or snippet from the original document")
+    page: Optional[int] = Field(None, description="Page number (set by the server, not the LLM)")
+    source_text: Optional[str] = Field(
+        None,
+        description="A short VERBATIM quote (max ~200 chars) copied exactly from the source text that supports this event",
+    )
+    verified: bool = Field(False, description="True if source_text was found in the original document")
 
 class TimelineEvent(BaseModel):
     event_id: str = Field(..., description="Unique identifier for this specific event")
     patient_id: Optional[str] = Field(None, description="Identifier for the patient")
     date: Optional[str] = Field(None, description="Normalized date string in YYYY-MM-DD or YYYY-MM format. Null if undated.")
     original_date_str: Optional[str] = Field(None, description="The raw date string as written in the report")
-    event_type: Literal["Diagnosis", "Medication", "Lab Result", "Procedure", "Symptom", "Visit", "Other"]
+    event_type: Literal[
+        "Diagnosis", "Medication", "Lab Result", "Procedure",
+        "Symptom", "Visit", "Family History", "Other"
+    ]
     title: str = Field(..., description="Concise summary title of the event")
     description: str = Field(..., description="Detailed description or clinical context")
     abnormal: bool = Field(False, description="Flag indicating if the event represents an abnormal finding")
-    
-    # Structured Clinical Details
+
     lab: Optional[LabMeasurement] = None
     medication: Optional[MedicationInfo] = None
-    
-    # Traceability
     source: Optional[SourceReference] = None
 
+class DocumentMetadata(BaseModel):
+    patient_id: Optional[str] = Field(
+        None, 
+        description="Patient ID extracted directly from the document header or demographics section if present (e.g., PT-8472-X, P001)."
+    )
+    patient_name: Optional[str] = Field(
+        None, 
+        description="Full name of the patient if present in the document."
+    )
+
 class ExtractionResponse(BaseModel):
+    metadata: Optional[DocumentMetadata] = Field(None, description="Extracted patient demographics and header metadata")
     events: List[TimelineEvent] = Field(default_factory=list, description="List of extracted timeline events from the medical text")

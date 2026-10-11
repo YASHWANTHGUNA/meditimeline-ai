@@ -3,10 +3,13 @@ import TimelineEvent from './TimelineEvent';
 import { Activity, Clock } from 'lucide-react';
 
 export default function Timeline({ timelineData }) {
-  // Backend returns events inside timeline.all_events.
-  // Keep the fallback for compatibility with a flat events response.
+  // Robust fallback to catch events from all possible backend response keys
+  const timelineObj = timelineData?.timeline || timelineData;
   const events =
-    timelineData?.timeline?.all_events ??
+    timelineObj?.all_events ??
+    (timelineObj?.dated_events || timelineObj?.undated_events 
+      ? [...(timelineObj?.dated_events || []), ...(timelineObj?.undated_events || [])] 
+      : null) ??
     timelineData?.events ??
     [];
 
