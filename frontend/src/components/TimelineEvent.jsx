@@ -23,9 +23,12 @@ export default function TimelineEvent({ event }) {
   const Icon = cfg.icon;
   const { lab, medication: med } = event;
 
+  // Only show abnormal badge if it's explicitly abnormal AND not family history or routine context
+  const isActuallyAbnormal = event.abnormal && event.event_type !== 'Family History';
+
   return (
     <div className="relative pl-8 pb-8 border-l-2 border-slate-200 last:border-l-transparent group">
-      <div className={`absolute -left-[9px] top-1 w-4 h-4 rounded-full border-4 border-white shadow-sm ${event.abnormal ? 'bg-red-500' : 'bg-blue-600'}`} />
+      <div className={`absolute -left-[9px] top-1 w-4 h-4 rounded-full border-4 border-white shadow-sm ${isActuallyAbnormal ? 'bg-red-500' : 'bg-blue-600'}`} />
 
       <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
@@ -38,7 +41,7 @@ export default function TimelineEvent({ event }) {
               {event.date || event.original_date_str || 'Undated'}
             </span>
           </div>
-          {event.abnormal && (
+          {isActuallyAbnormal && (
             <span className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg text-red-600 bg-red-50 border border-red-100">
               <AlertCircle className="w-4 h-4" /> Abnormal
             </span>
