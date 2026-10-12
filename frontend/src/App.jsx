@@ -50,7 +50,7 @@ export default function App() {
         )}
 
         {!isLoading && timelineData && (
-          <Timeline timelineData={timelineData} />
+          <Timeline events={timelineData.all_events || []} />
         )}
       </main>
     </div>

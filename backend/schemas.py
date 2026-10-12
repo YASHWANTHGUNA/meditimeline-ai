@@ -2,10 +2,10 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 
 class LabMeasurement(BaseModel):
-    test_name: str = Field(..., description="Name of the laboratory test (e.g., HbA1c, Fasting Glucose)")
+    test_name: str = Field(..., description="Name of the laboratory test or vital sign (e.g., HbA1c, Blood Pressure)")
     value: Optional[float] = Field(None, description="Numeric value of the result if applicable")
-    value_text: Optional[str] = Field(None, description="Text representation of the result if not purely numeric")
-    unit: Optional[str] = Field(None, description="Unit of measurement (e.g., mg/dL, %)")
+    value_text: Optional[str] = Field(None, description="Text representation of the result if not purely numeric (e.g., 128/82)")
+    unit: Optional[str] = Field(None, description="Unit of measurement (e.g., mg/dL, %, mmHg)")
     reference_low: Optional[float] = Field(None, description="Lower bound of the normal reference range")
     reference_high: Optional[float] = Field(None, description="Upper bound of the normal reference range")
     status: Literal["normal", "high", "low", "critical", "unknown"] = "unknown"
@@ -35,7 +35,7 @@ class TimelineEvent(BaseModel):
     date: Optional[str] = Field(None, description="Normalized date string in YYYY-MM-DD or YYYY-MM format. Null if undated.")
     original_date_str: Optional[str] = Field(None, description="The raw date string as written in the report")
     event_type: Literal[
-        "Diagnosis", "Medication", "Lab Result", "Procedure",
+        "Diagnosis", "Medication", "Lab Result", "Vital Sign", "Procedure",
         "Symptom", "Visit", "Family History", "Other"
     ]
     title: str = Field(..., description="Concise summary title of the event")
@@ -48,11 +48,11 @@ class TimelineEvent(BaseModel):
 
 class DocumentMetadata(BaseModel):
     patient_id: Optional[str] = Field(
-        None, 
+        None,
         description="Patient ID extracted directly from the document header or demographics section if present (e.g., PT-8472-X, P001)."
     )
     patient_name: Optional[str] = Field(
-        None, 
+        None,
         description="Full name of the patient if present in the document."
     )
 
