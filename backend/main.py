@@ -1,4 +1,6 @@
 import os
+import re
+import html
 import uuid
 import asyncio
 import hashlib
@@ -32,6 +34,7 @@ db = client.meditimeline
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.documents.create_index([("patient_id", 1), ("content_hash", 1)], unique=True)
+    await db.documents.create_index([("content_hash", 1)])
     await db.events.create_index([("patient_id", 1)])
     yield
 
@@ -57,9 +60,37 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+_ENTITY_FIXES = {"lt;": "<", "gt;": ">", "amp;": "&"}
+
+
+def clean_quote(text: Optional[str]) -> Optional[str]:
+    """Display-only cleanup of PDF artefacts such as '&lt;' or a bare 'lt;' for '<'."""
+    if not text:
+        return text
+    t = html.unescape(text)
+    t = re.sub(r"(?<![A-Za-z&])(lt;|gt;|amp;)", lambda m: _ENTITY_FIXES[m.group(1)], t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+async def _existing_result(patient_id: str, message: str):
+    result = await get_patient_timeline(patient_id)
+    result["message"] = message
+    result["duplicate"] = True
+    return result
+
+
 async def _ingest(provided_patient_id: Optional[str], pages: List[ParsedPage], content_hash: str,
                   source_type: str, document_name: str):
-    # 1. Extract with Gemini first
+    # 0. Cheap duplicate check BEFORE spending any Gemini quota
+    existing = await db.documents.find_one({"content_hash": content_hash}, {"_id": 0})
+    if existing:
+        pid = existing["patient_id"]
+        if await db.events.count_documents({"patient_id": pid}) > 0:
+            return await _existing_result(pid, f"This document was already processed for patient {pid}.")
+        # orphaned record from a failed earlier run -> clean up and reprocess
+        await db.documents.delete_one({"content_hash": content_hash, "patient_id": pid})
+
+    # 1. Extract with Gemini (retry + fallback live in services.py)
     chunks = build_chunks(pages)
     try:
         extraction = await extract_timeline_from_chunks(chunks)
@@ -68,25 +99,9 @@ async def _ingest(provided_patient_id: Optional[str], pages: List[ParsedPage], c
 
     meta = extraction.get("metadata") or {}
     auto_extracted_pid = meta.get("patient_id")
-    
+
     # Hierarchy: AI Extracted > Form Provided > Default Fallback
     patient_id = auto_extracted_pid if auto_extracted_pid else (provided_patient_id or "P001")
-
-    # 2. Exact File Deduplication (With Orphan Cleanup)
-    existing = await db.documents.find_one(
-        {"patient_id": patient_id, "content_hash": content_hash}, {"_id": 0}
-    )
-    if existing:
-        # Check if events actually exist for this patient
-        event_count = await db.events.count_documents({"patient_id": patient_id})
-        if event_count > 0:
-            result = await get_patient_timeline(patient_id)
-            result["message"] = f"This document was already processed for patient {patient_id}."
-            result["duplicate"] = True
-            return result
-        else:
-            # Clean up orphaned document from a previously failed run
-            await db.documents.delete_one({"patient_id": patient_id, "content_hash": content_hash})
 
     raw_events = extraction.get("events", [])
     if not raw_events:
@@ -109,22 +124,19 @@ async def _ingest(provided_patient_id: Optional[str], pages: List[ParsedPage], c
         "event_count": len(raw_events),
     })
 
-    # 3. Database-Level Semantic Deduplication
+    # 2. Semantic dedupe against what this patient already has
     existing_events = await db.events.find(
-        {"patient_id": patient_id}, 
+        {"patient_id": patient_id},
         {"event_type": 1, "title": 1, "date": 1, "original_date_str": 1, "_id": 0}
     ).to_list(length=None)
-    
-    seen_keys = set()
-    for ev in existing_events:
-        key = (
-            ev.get("event_type"),
-            (ev.get("title") or "").strip().lower(),
-            ev.get("date") or ev.get("original_date_str") or ""
-        )
-        seen_keys.add(key)
 
-    # 4. Verify provenance & filter duplicates
+    seen_keys = {
+        (ev.get("event_type"), (ev.get("title") or "").strip().lower(),
+         ev.get("date") or ev.get("original_date_str") or "")
+        for ev in existing_events
+    }
+
+    # 3. Verify provenance (on raw text), then clean the quote for display
     to_insert = []
     for event in raw_events:
         key = (
@@ -132,16 +144,15 @@ async def _ingest(provided_patient_id: Optional[str], pages: List[ParsedPage], c
             (event.get("title") or "").strip().lower(),
             event.get("date") or event.get("original_date_str") or ""
         )
-        
         if key in seen_keys:
             continue
-            
         seen_keys.add(key)
-        
+
         src = event.get("source") or {}
         page, verified = locate_source(src.get("source_text"), pages)
         event["source"] = {
             **src,
+            "source_text": clean_quote(src.get("source_text")),
             "document_id": document_id,
             "document_name": document_name,
             "page": page,
@@ -153,7 +164,7 @@ async def _ingest(provided_patient_id: Optional[str], pages: List[ParsedPage], c
 
     if to_insert:
         await db.events.insert_many(to_insert)
-        
+
     return await get_patient_timeline(patient_id)
 
 
@@ -163,7 +174,7 @@ async def parse_report(request: ParseRequest):
         raise HTTPException(status_code=400, detail="Text cannot be empty.")
     pages = pages_from_text(request.text)
     return await _ingest(
-        provided_patient_id=request.request.patient_id if hasattr(request, 'request') else request.patient_id,
+        provided_patient_id=request.patient_id,
         pages=pages,
         content_hash=_sha256(request.text.strip().encode("utf-8")),
         source_type="text_paste",
@@ -173,7 +184,7 @@ async def parse_report(request: ParseRequest):
 
 @app.post("/api/upload-report")
 async def upload_report(
-    file: UploadFile = File(...), 
+    file: UploadFile = File(...),
     patient_id: Optional[str] = Form(None)
 ):
     if not (file.filename or "").lower().endswith(".pdf"):
@@ -202,11 +213,6 @@ async def upload_report(
 @app.get("/patients/{patient_id}/timeline")
 async def get_patient_timeline(patient_id: str):
     events = await db.events.find({"patient_id": patient_id}, {"_id": 0}).to_list(length=None)
-    
-    # Process the events using the timeline engine
     result = process_timeline_events(events)
-    
-    # Inject the patient ID so the React frontend can display it
-    result["patient_id"] = patient_id 
-    
+    result["patient_id"] = patient_id
     return result
