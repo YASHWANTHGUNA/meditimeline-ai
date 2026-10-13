@@ -19,6 +19,7 @@ load_dotenv()
 
 from services import extract_timeline_from_chunks
 from timeline_engine import process_timeline_events
+from risk_engine import compute_risk_flags
 from pdf_parser import (
     parse_pdf, pages_from_text, build_chunks, locate_source,
     PdfParseError, ParsedPage,
@@ -42,9 +43,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="MediTimeline AI API", lifespan=lifespan)
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+ALLOWED_ORIGINS = [o.strip() for o in FRONTEND_URL.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -216,3 +218,18 @@ async def get_patient_timeline(patient_id: str):
     result = process_timeline_events(events)
     result["patient_id"] = patient_id
     return result
+
+
+
+@app.get("/patients/{patient_id}/risk-flags")
+async def get_risk_flags(patient_id: str):
+    """Rule-based preventive insights (not a diagnosis) over the patient's stored events."""
+    events = await db.events.find({"patient_id": patient_id}, {"_id": 0}).to_list(length=None)
+    if not events:
+        raise HTTPException(status_code=404, detail="No records found for this patient.")
+    return compute_risk_flags(events)
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
