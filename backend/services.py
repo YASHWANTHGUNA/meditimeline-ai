@@ -10,14 +10,48 @@ from schemas import ExtractionResponse
 
 client = genai.Client()
 
-PRIMARY_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+PRIMARY_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 # Tried in order when the primary model is overloaded (503) or rate limited (429).
 FALLBACK_MODELS = [
     m.strip()
-    for m in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-2.5-flash-lite,gemini-2.0-flash").split(",")
+    for m in os.getenv("GEMINI_FALLBACK_MODELS", "").split(",")
     if m.strip()
 ]
 MODEL_CHAIN = [PRIMARY_MODEL] + [m for m in FALLBACK_MODELS if m != PRIMARY_MODEL]
+
+_discovered: List[str] | None = None
+_SKIP_WORDS = ("image", "tts", "audio", "live", "embedding", "robotics", "computer-use", "vision", "learnlm")
+
+
+async def _discover_models() -> List[str]:
+    """Ask the API which flash models this key can actually call (model names get retired)."""
+    global _discovered
+    if _discovered is not None:
+        return _discovered
+    found: List[str] = []
+    try:
+        pager = await client.aio.models.list()
+        async for m in pager:
+            name = (m.name or "").replace("models/", "")
+            actions = getattr(m, "supported_actions", None) or []
+            if "flash" in name and "generateContent" in actions and not any(w in name for w in _SKIP_WORDS):
+                found.append(name)
+    except Exception as e:  # discovery is best-effort
+        print(f"[gemini] model discovery failed: {e}")
+    # newest/most specific first, lite variants last
+    found.sort(key=lambda n: ("lite" in n, n), reverse=False)
+    _discovered = found
+    print(f"[gemini] discovered models: {found}")
+    return found
+
+
+async def _chain() -> List[str]:
+    chain = list(MODEL_CHAIN)
+    for m in await _discover_models():
+        if m not in chain:
+            chain.append(m)
+    return chain
+
 
 RETRIES_PER_MODEL = int(os.getenv("GEMINI_RETRIES", "3"))
 BASE_DELAY = 1.5  # seconds; doubles each attempt, plus jitter
@@ -76,7 +110,8 @@ async def _call_model(model: str, chunk: str) -> dict:
 async def _extract_chunk(chunk: str) -> dict:
     """Retry with exponential backoff + jitter, then fall back to the next model."""
     last_err: Exception | None = None
-    for model in MODEL_CHAIN:
+    codes: List[int] = []
+    for model in await _chain():
         for attempt in range(RETRIES_PER_MODEL):
             try:
                 async with _semaphore:
@@ -87,7 +122,9 @@ async def _extract_chunk(chunk: str) -> dict:
             except errors.APIError as e:
                 last_err = e
                 code = getattr(e, "code", None)
-                if code == 404:          # model not available to this key -> next model
+                codes.append(code)
+                if code == 404:          # model retired / not available to this key -> next model
+                    print(f"[gemini] {model} not available (404); skipping")
                     break
                 if code not in RETRYABLE_CODES:
                     raise                # 400/401/403: retrying won't help
@@ -97,6 +134,8 @@ async def _extract_chunk(chunk: str) -> dict:
             except (json.JSONDecodeError, ValueError) as e:
                 last_err = e             # malformed JSON: one more try is usually enough
                 await asyncio.sleep(BASE_DELAY)
+    if last_err is not None:
+        last_err.all_codes = codes       # type: ignore[attr-defined]
     raise last_err or RuntimeError("Gemini extraction failed")
 
 
@@ -116,16 +155,28 @@ def _dedupe(events: List[dict]) -> List[dict]:
     return out
 
 
+def _friendly_message(e: Exception) -> str:
+    code = getattr(e, "code", None)
+    codes = set(getattr(e, "all_codes", []) or [])
+    if code in (401, 403):
+        return "The AI service rejected the API key. Check GEMINI_API_KEY on the server."
+    if code == 400:
+        return "The AI service rejected the request. Please try a different document."
+    if 429 in codes and not (codes & {500, 502, 503, 504}):
+        return "The AI quota is used up for now. Please try again later."
+    if codes and codes <= {404}:
+        return "None of the configured AI models are available. Update GEMINI_MODEL on the server."
+    return ("The AI service is overloaded right now. We retried and tried backup models, "
+            "but none responded. Please try again in a minute.")
+
+
 async def extract_timeline_from_chunks(chunks: List[str]) -> Dict:
     """Runs Gemini over every chunk concurrently (bounded) and merges the results."""
     try:
         results = await asyncio.gather(*[_extract_chunk(c) for c in chunks])
     except Exception as e:
         print(f"Error during Gemini extraction (all models/retries exhausted): {e}")
-        raise RuntimeError(
-            "The AI service is overloaded right now. We retried and tried backup models, "
-            "but none responded. Please try again in a minute."
-        ) from e
+        raise RuntimeError(_friendly_message(e)) from e
 
     merged_events = []
     extracted_pid = None
