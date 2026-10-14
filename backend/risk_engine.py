@@ -171,6 +171,17 @@ def compute_risk_flags(events: List[dict]) -> Dict[str, Any]:
         add("Kidney markers", f"{names} outside the reference range in the report.", "soon",
             "Follow up with a clinician and keep blood pressure well controlled.", kidney[-1])
 
+    # --- Inflammation markers flagged by the report itself ----------------
+    infl = [
+        e for e in events
+        if e.get("event_type") in _MEASURE_TYPES and re.search(r"\bcrp\b|c-reactive|\besr\b|sedimentation", _name(e))
+        and (_lab(e).get("status") in ("high", "critical") or e.get("abnormal"))
+    ]
+    if infl:
+        names = ", ".join(sorted({(_lab(e).get("test_name") or e.get("title")) for e in infl}))
+        add("Inflammation markers", f"{names} above the reference range in the report.", "soon",
+            "Elevated inflammation markers are non-specific; review with the treating clinician and keep follow-up visits.", infl[-1])
+
     # --- Symptoms worth attention ----------------------------------------
     for e in events:
         if e.get("event_type") == "Symptom" and re.search(
