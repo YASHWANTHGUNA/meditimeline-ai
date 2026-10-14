@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ShieldCheck, AlertTriangle, Siren, Loader2 } from 'lucide-react';
-import { getRiskFlags } from '../api';
+import { getRiskFlags } from "../services/api";
 
 const LEVEL = {
   routine: { label: 'Routine follow-up', box: 'bg-emerald-50 border-emerald-200 text-emerald-800', chip: 'bg-emerald-100 text-emerald-700', icon: ShieldCheck },

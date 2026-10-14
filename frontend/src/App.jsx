@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import ReportInput from './components/ReportInput';
 import Timeline from './components/Timeline';
+import RiskPanel from './components/RiskPanel';
 import { Activity, AlertCircle, Loader2 } from 'lucide-react';
 
 export default function App() {
@@ -10,28 +11,24 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col font-sans">
-      {/* Clean White Header */}
       <header className="bg-white border-b border-slate-100 sticky top-0 z-10 shadow-sm">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="bg-blue-600 text-white p-2 rounded-xl shadow-md shadow-blue-600/20">
               <Activity className="w-6 h-6" />
             </div>
-            <div>
-              <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight leading-none">
-                MediTimeline <span className="text-blue-600">AI</span>
-              </h1>
-            </div>
+            <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight leading-none">
+              MediTimeline <span className="text-blue-600">AI</span>
+            </h1>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-5xl w-full mx-auto px-6 py-10 flex-1">
-        <ReportInput 
-          onAnalysisComplete={setTimelineData} 
-          setIsLoading={setIsLoading} 
-          setError={setError} 
+        <ReportInput
+          onAnalysisComplete={setTimelineData}
+          setIsLoading={setIsLoading}
+          setError={setError}
         />
 
         {error && (
@@ -50,7 +47,13 @@ export default function App() {
         )}
 
         {!isLoading && timelineData && (
-          <Timeline events={timelineData.all_events || []} />
+          <>
+            <RiskPanel
+              patientId={timelineData.patient_id}
+              refreshKey={timelineData.total_events ?? timelineData.all_events?.length}
+            />
+            <Timeline timelineData={timelineData} />
+          </>
         )}
       </main>
     </div>

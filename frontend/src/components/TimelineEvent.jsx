@@ -23,6 +23,24 @@ const ACTION_STYLE = {
   stopped: 'bg-red-50 text-red-700 border-red-200',
 };
 
+
+// "98%" + unit "%" must not render as "98% %"
+const labDisplay = (lab) => {
+  const v = lab.value_text ?? lab.value;
+  const u = lab.unit || '';
+  if (!u || String(v).toLowerCase().includes(u.toLowerCase())) return String(v);
+  return `${v} ${u}`;
+};
+
+const refDisplay = (lab) => {
+  const { reference_low: lo, reference_high: hi, unit } = lab;
+  const u = unit ? ` ${unit}` : '';
+  if (lo != null && hi != null) return `${lo} – ${hi}${u}`;
+  if (hi != null) return `< ${hi}${u}`;
+  if (lo != null) return `> ${lo}${u}`;
+  return null;
+};
+
 export default function TimelineEvent({ event }) {
   const cfg = CONFIG[event.event_type] || CONFIG.Other;
   const Icon = cfg.icon;
@@ -59,13 +77,9 @@ export default function TimelineEvent({ event }) {
           <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap items-center gap-3 text-sm">
             <span className="font-semibold text-slate-700">{lab.test_name}</span>
             <span className={`font-mono font-bold px-2.5 py-1 rounded-lg border ${lab.status === 'normal' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-              {lab.value_text ?? lab.value} {lab.unit}
+              {labDisplay(lab)}
             </span>
-            {(lab.reference_low != null || lab.reference_high != null) && (
-              <span className="text-xs text-slate-500">
-                Ref: {lab.reference_low ?? '–'} – {lab.reference_high ?? '–'} {lab.unit}
-              </span>
-            )}
+            {refDisplay(lab) && <span className="text-xs text-slate-500">Ref: {refDisplay(lab)}</span>}
             <span className="text-xs uppercase font-bold text-slate-400">{lab.status}</span>
           </div>
         )}
